@@ -1,0 +1,20 @@
+# Entorno virtual
+.venv/
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# Logs
+logs/
+
+# Archivos Excel de datos (privados)
+*.xls
+*.xlsx
+
+# Archivo plist (configuración local de macOS)
+com.inversus.conciliacion.plist

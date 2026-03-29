@@ -1,0 +1,367 @@
+════════════════════════════════════════════════════════════════════════════════
+  SISTEMA DE CONCILIACIÓN BANCARIA AUTOMATIZADA
+  Punteo automático: Extracto Bancario ↔ Libro Mayor (cuenta 572.1)
+════════════════════════════════════════════════════════════════════════════════
+
+
+1. QUÉ ES Y PARA QUÉ SIRVE
+────────────────────────────────────────────────────────────────────────────────
+
+Este programa realiza de forma automática el punteo (conciliación) entre dos
+fuentes de información contable:
+
+  • El extracto bancario exportado desde la entidad financiera (BusinessBank).
+  • El libro mayor de la cuenta 572.1 exportado desde CegidDiezCon.
+
+Su objetivo es identificar qué movimientos del banco ya están registrados en
+contabilidad y cuáles no, generando un informe Excel detallado que el
+contable puede revisar directamente.
+
+El sistema está diseñado para el grupo Inversus pero es reutilizable para
+cualquier otra empresa (Audiomed, etc.) cambiando únicamente los archivos
+de entrada y, si fuera necesario, los parámetros de configuración del script.
+
+
+2. POLÍTICA FUNDAMENTAL: CERO FALSOS POSITIVOS
+────────────────────────────────────────────────────────────────────────────────
+
+La prioridad absoluta del sistema es la precisión:
+
+  → NUNCA se marca como conciliado un movimiento si hay incertidumbre.
+  → Ante la duda, el movimiento se envía a PENDIENTE DE REVISIÓN MANUAL.
+  → Es preferible que un movimiento real quede como "pendiente" (falso
+    negativo) antes que marcar como conciliado algo que no lo es (falso
+    positivo).
+
+Esta filosofía se aplica en cada uno de los 6 pases de emparejamiento: si
+hay ambigüedad (por ejemplo, varios candidatos posibles para un mismo
+importe), el programa NO elige uno al azar — simplemente deja todos como
+pendientes para que el contable decida.
+
+
+3. ARCHIVOS DE ENTRADA
+────────────────────────────────────────────────────────────────────────────────
+
+El programa busca automáticamente en su propia carpeta dos archivos Excel:
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  Archivo del BANCO                                                  │
+  │  Cualquier .xls o .xlsx cuyo nombre contenga la palabra "BANCO"     │
+  │  Ejemplo: "572.1 BANCOS INVERSUS.xls"                              │
+  │                                                                     │
+  │  Estructura esperada:                                               │
+  │  - 3 filas iniciales a saltar (2 vacías + 1 cabecera)              │
+  │  - Columnas utilizadas: Fecha | Movimiento | Mas_datos | Importe   │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  Archivo del MAYOR                                                  │
+  │  Cualquier .xls o .xlsx cuyo nombre contenga la palabra "MAYOR"     │
+  │  Ejemplo: "572.1 MAYOR INVERSUS.xlsx"                              │
+  │                                                                     │
+  │  Estructura esperada:                                               │
+  │  - 5 filas iniciales a saltar (4 vacías + 1 cabecera)              │
+  │  - Columnas: Marca | Fecha | Documento | Concepto | Contrapartida  │
+  │              Debe | Haber | Saldo | Importe_neto | Importe_red     │
+  │  - Fechas en formato DD/MM/AAAA                                    │
+  └──────────────────────────────────────────────────────────────────────┘
+
+Si los archivos de otra empresa tienen una estructura distinta (diferente
+número de filas a saltar, otro formato de fecha, etc.), basta con modificar
+el diccionario CONFIG al inicio del script.
+
+
+4. CÓMO SE EJECUTA
+────────────────────────────────────────────────────────────────────────────────
+
+Requisitos previos (solo la primera vez):
+
+  1. Tener Python 3.10 o superior instalado.
+  2. Crear un entorno virtual:     python3 -m venv .venv
+  3. Activarlo:                    source .venv/bin/activate
+  4. Instalar dependencias:        pip install pandas openpyxl xlrd xlsxwriter
+
+Ejecución:
+
+  1. Coloca los dos archivos Excel (banco y mayor) en la misma carpeta
+     que el script conciliacion.py.
+  2. Activa el entorno virtual:    source .venv/bin/activate
+  3. Ejecuta:                      python3 conciliacion.py
+
+El programa mostrará el progreso en la terminal y generará un archivo
+Excel de salida con nombre:
+
+  CONCILIACION_<EMPRESA>_<AÑO>_<FECHA_HORA>.xlsx
+
+
+5. CÓMO FUNCIONA: LOS 6 PASES DE EMPAREJAMIENTO
+────────────────────────────────────────────────────────────────────────────────
+
+El motor de conciliación trabaja en 6 pases secuenciales, de mayor a menor
+confianza. Cada pase solo actúa sobre movimientos que los pases anteriores
+NO lograron conciliar. Una vez que un movimiento se concilia en un pase,
+no vuelve a analizarse.
+
+  ╔═════════════════════════════════════════════════════════════════════╗
+  ║  PASS 1 — Importe exacto + fecha exacta            CONFIANZA ALTA ║
+  ╠═════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Busca pares donde el importe del banco coincide exactamente con   ║
+  ║  el importe neto del mayor Y la fecha es la misma.                 ║
+  ║                                                                    ║
+  ║  Condición extra: si hay N movimientos en banco con ese importe    ║
+  ║  y fecha, debe haber exactamente N en el mayor. Si los números     ║
+  ║  no cuadran, NO se empareja (ambiguo).                             ║
+  ║                                                                    ║
+  ║  Ejemplo: Nómina de -1.450,23€ el 28/02/2025 en banco y mayor     ║
+  ║  → conciliado con confianza ALTA.                                  ║
+  ║                                                                    ║
+  ║  Este pase resuelve la gran mayoría (~95%) de los emparejamientos. ║
+  ╚═════════════════════════════════════════════════════════════════════╝
+
+  ╔═════════════════════════════════════════════════════════════════════╗
+  ║  PASS 2 — Importe exacto + fecha ±3 días           CONFIANZA ALTA ║
+  ╠═════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Para movimientos no conciliados en Pass 1, busca por importe      ║
+  ║  exacto permitiendo hasta 3 días de desfase entre banco y mayor.   ║
+  ║                                                                    ║
+  ║  Requisito: debe haber exactamente UN candidato en banco y UN      ║
+  ║  candidato en mayor dentro de la ventana. Si hay más de uno en     ║
+  ║  cualquier lado, no empareja.                                      ║
+  ║                                                                    ║
+  ║  Cubre el caso típico de transferencias que el banco registra      ║
+  ║  un día o dos después de la fecha valor contable.                  ║
+  ╚═════════════════════════════════════════════════════════════════════╝
+
+  ╔═════════════════════════════════════════════════════════════════════╗
+  ║  PASS 3 — Importe exacto + fecha ±15 días         CONFIANZA MEDIA ║
+  ╠═════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Igual que Pass 2 pero con ventana ampliada a 15 días.             ║
+  ║  Sigue exigiendo par único en la ventana.                          ║
+  ║                                                                    ║
+  ║  Cubre desfases mayores por contabilizaciones tardías, cierres     ║
+  ║  de mes o regularizaciones.                                        ║
+  ╚═════════════════════════════════════════════════════════════════════╝
+
+  ╔═════════════════════════════════════════════════════════════════════╗
+  ║  PASS 4 — Importe único global                    CONFIANZA MEDIA ║
+  ╠═════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Busca importes que aparecen exactamente UNA vez en el banco sin   ║
+  ║  conciliar y UNA vez en el mayor sin conciliar.                    ║
+  ║                                                                    ║
+  ║  Como el importe es único en ambos lados, es casi seguro que se    ║
+  ║  trata del mismo movimiento. Se permite hasta 60 días de desfase.  ║
+  ║                                                                    ║
+  ║  Ejemplo: Un pago de -7.342,19€ que solo aparece una vez en todo   ║
+  ║  el banco y una vez en todo el mayor → emparejado.                 ║
+  ╚═════════════════════════════════════════════════════════════════════╝
+
+  ╔═════════════════════════════════════════════════════════════════════╗
+  ║  PASS 5 — Duplicados + proximidad temporal        CONFIANZA MEDIA ║
+  ╠═════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Para importes que aparecen múltiples veces (ej: suscripciones     ║
+  ║  mensuales de -24,19€), empareja por proximidad de fecha usando    ║
+  ║  un algoritmo greedy (codicioso): cada movimiento del banco se     ║
+  ║  empareja con el candidato del mayor más cercano en fecha.         ║
+  ║                                                                    ║
+  ║  Límite: solo empareja si la distancia es ≤10 días.               ║
+  ║                                                                    ║
+  ║  Ejemplo: Cuota ARSYS de -143,28€ el 05/03, 05/04, 05/05...       ║
+  ║  cada una se empareja con la del mayor más cercana en fecha.       ║
+  ╚═════════════════════════════════════════════════════════════════════╝
+
+  ╔═════════════════════════════════════════════════════════════════════╗
+  ║  PASS 6 — Splits 1:N (suma de partes)              CONFIANZA BAJA ║
+  ╠═════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Detecta el caso en que UN movimiento del banco corresponde a      ║
+  ║  VARIOS apuntes del mayor cuya suma coincide exactamente.          ║
+  ║                                                                    ║
+  ║  Ejemplo real: Amazon cobra -18,90€ en banco, pero en contabilidad ║
+  ║  está desglosado como -3,99 + -4,92 + -9,99 = -18,90.             ║
+  ║                                                                    ║
+  ║  Restricciones (ultra-conservadoras):                              ║
+  ║  • Máximo 4 partes en el mayor                                     ║
+  ║  • Todos los apuntes del mayor deben estar dentro de ±5 días       ║
+  ║    de la fecha del banco                                           ║
+  ║  • Los apuntes del mayor deben estar agrupados temporalmente       ║
+  ║    (máximo 7 días entre el primero y el último)                    ║
+  ║  • Todos deben ser del mismo signo que el movimiento del banco     ║
+  ║  • Debe existir exactamente UNA combinación válida; si hay         ║
+  ║    múltiples posibilidades, no empareja (ambiguo)                  ║
+  ║                                                                    ║
+  ║  Los resultados se marcan como BAJA confianza para que el          ║
+  ║  contable los verifique.                                           ║
+  ╚═════════════════════════════════════════════════════════════════════╝
+
+Tras estos 6 pases, todo lo que quede sin emparejar se clasifica como
+PENDIENTE DE REVISIÓN MANUAL.
+
+
+6. ARCHIVO DE SALIDA: ESTRUCTURA DEL EXCEL
+────────────────────────────────────────────────────────────────────────────────
+
+El programa genera un único archivo Excel con 6 hojas:
+
+  ┌─────────────────────┬─────────────────────────────────────────────────┐
+  │  Hoja               │  Contenido                                     │
+  ├─────────────────────┼─────────────────────────────────────────────────┤
+  │  RESUMEN            │  Panel de control con KPIs:                    │
+  │                     │  - Nº de movimientos conciliados / pendientes  │
+  │                     │  - Porcentaje de conciliación                  │
+  │                     │  - Sumas por estado                            │
+  │                     │  - Desglose por nivel de confianza             │
+  │                     │  - Verificación de saldos                      │
+  ├─────────────────────┼─────────────────────────────────────────────────┤
+  │  CONCILIADOS        │  Todas las parejas encontradas con:            │
+  │                     │  - Nivel de confianza (ALTA/MEDIA/BAJA)        │
+  │                     │  - Nº de pase que lo encontró                  │
+  │                     │  - Detalle del criterio de matching            │
+  │                     │  - Datos completos del banco y del mayor       │
+  │                     │  - Fila original en Excel (para verificación)  │
+  │                     │  - Días de desfase entre ambas fechas          │
+  │                     │  Coloreado: verde=ALTA, amarillo=MEDIA         │
+  ├─────────────────────┼─────────────────────────────────────────────────┤
+  │  BANCO_PENDIENTE    │  Movimientos del banco sin conciliar.          │
+  │                     │  Estos son movimientos que aparecen en el      │
+  │                     │  extracto bancario pero no tienen contrapartida│
+  │                     │  encontrada en el mayor. Pueden ser:           │
+  │                     │  - Gastos no contabilizados (TGSS, comisiones) │
+  │                     │  - Pagos pendientes de registrar               │
+  │                     │  - Movimientos con desfase que el programa     │
+  │                     │    no pudo emparejar con certeza               │
+  │                     │  Coloreado en rojo para atención inmediata.    │
+  ├─────────────────────┼─────────────────────────────────────────────────┤
+  │  MAYOR_PENDIENTE    │  Apuntes del mayor sin conciliar.              │
+  │                     │  Son asientos contables que no tienen          │
+  │                     │  contrapartida en el extracto bancario.        │
+  │                     │  Típicamente: pagos con tarjeta de crédito,    │
+  │                     │  compras en gasolineras, ferreterías, etc.     │
+  │                     │  que se liquidan agrupadas en el banco.        │
+  │                     │  Coloreado en rojo.                            │
+  ├─────────────────────┼─────────────────────────────────────────────────┤
+  │  AGRUPACIONES_1N    │  Detalle de los emparejamientos 1:N (splits).  │
+  │                     │  Muestra el movimiento del banco y todos los   │
+  │                     │  apuntes del mayor que componen su suma.       │
+  │                     │  Numerados por grupo para fácil revisión.      │
+  ├─────────────────────┼─────────────────────────────────────────────────┤
+  │  BANCO_COMPLETO     │  Vista completa del extracto bancario con      │
+  │                     │  una columna de Estado añadida:                │
+  │                     │  CONCILIADO / AGRUPACIÓN / PENDIENTE           │
+  │                     │  Permite ver todo el extracto de un vistazo    │
+  │                     │  con filtros de Excel para aislar pendientes.  │
+  └─────────────────────┴─────────────────────────────────────────────────┘
+
+
+7. PARÁMETROS CONFIGURABLES
+────────────────────────────────────────────────────────────────────────────────
+
+Todos los parámetros están centralizados en el diccionario CONFIG al inicio
+del script. Los más relevantes:
+
+  banco_skiprows ........... Filas a saltar en el Excel del banco (por defecto 3)
+  mayor_skiprows ........... Filas a saltar en el Excel del mayor (por defecto 5)
+  mayor_date_format ........ Formato de fecha del mayor (por defecto DD/MM/AAAA)
+  ventana_dias_pass2 ....... Tolerancia en días para Pass 2 (por defecto ±3)
+  ventana_dias_pass3 ....... Tolerancia en días para Pass 3 (por defecto ±15)
+  ventana_dias_pass4 ....... Tolerancia en días para Pass 4 (por defecto ±60)
+  ventana_dias_duplicados .. Tolerancia para duplicados Pass 5 (por defecto ±10)
+  ventana_dias_split ....... Tolerancia para splits Pass 6 (por defecto ±5)
+  max_split_parts .......... Máximo de partes en un split (por defecto 4)
+  fecha_inicio ............. Inicio del período a conciliar
+  fecha_fin ................ Fin del período a conciliar
+
+
+8. RESULTADOS TÍPICOS — INVERSUS 2025
+────────────────────────────────────────────────────────────────────────────────
+
+Con los datos de Inversus para el ejercicio 2025:
+
+  • Extracto bancario: 1.896 movimientos
+  • Libro mayor 572.1: 1.506 apuntes
+
+  • Conciliados banco: 1.433 (75,6%)
+  • Conciliados mayor: 1.447 (96,1%)
+
+  • Confianza ALTA:   1.564 emparejamientos (98,3% de los matches)
+  • Confianza MEDIA:     27 emparejamientos
+  • Confianza BAJA:      11 agrupaciones 1:N
+
+  • Banco pendiente: 463 movimientos → corresponden principalmente a:
+    - Comunidades de propietarios y gastos de edificios (97 movimientos)
+    - Tributos e impuestos (28)
+    - Comisiones bancarias C.BUSINESSBANK (24, suma neta 0€)
+    - Suscripciones (Adobe, iStock, ARSYS) (22)
+    - Seguros (ASISA, Mutua de Levante) (16)
+    - Renting (CaixaRenting) (15)
+    - V.Negocios crédito (12)
+    - Ampliaciones de capital a participadas (11)
+    - Traspasos sin contrapartida en mayor (9)
+    - TGSS / Seguridad Social (6)
+    - Donaciones (9)
+    - Región de Murcia (8)
+    - Otros (191)
+
+  • Mayor pendiente: 59 apuntes → principalmente pagos con tarjeta:
+    - Gasolineras (Combustibles La Hita): ~20 repostajes
+    - Leroy Merlin, Bricoman: material de obra
+    - El Corte Inglés, PC Componentes, Amazon (tarjeta)
+    - Correos, restaurantes, ferretería
+    - Apuntes de mayor cuantía sin contrapartida (DIMOVIL, F.R. ITP)
+
+
+9. INTERPRETACIÓN DE LOS PENDIENTES
+────────────────────────────────────────────────────────────────────────────────
+
+Banco pendiente (movimientos en banco que no están en contabilidad):
+
+  → Generalmente son gastos reales que AÚN no se han contabilizado:
+    pagos a comunidades, tributos, TGSS, comisiones bancarias, seguros,
+    renting, etc. El contable debe crearles el asiento correspondiente
+    en el mayor.
+
+Mayor pendiente (apuntes contables que no están en el extracto bancario):
+
+  → Suelen ser pagos con tarjeta de crédito o débito que el banco
+    liquida agrupados en una sola línea (o ni siquiera aparecen como
+    línea individual en el extracto). También pueden ser asientos de
+    ajuste o regularización que no tienen reflejo bancario directo.
+
+
+10. TRAZABILIDAD
+────────────────────────────────────────────────────────────────────────────────
+
+Cada línea del informe de salida incluye:
+
+  • fila_excel: la fila exacta en el archivo Excel original, para que
+    el contable pueda localizar instantáneamente el movimiento en la
+    fuente y verificarlo.
+
+  • banco_idx / mayor_idx: índice interno para rastreo programático.
+
+  • Detalle del matching: texto explicativo de por qué se concilió
+    (ej: "Importe exacto + fecha exacta", "Duplicado emparejado por
+    proximidad (2d)", "Split 1:3 detectado (-3.99 + -4.92 + -9.99 =
+    -18.90)").
+
+
+11. PARA USAR CON OTRA EMPRESA
+────────────────────────────────────────────────────────────────────────────────
+
+  1. Coloca los Excel de banco y mayor de la nueva empresa en la carpeta.
+  2. Verifica que los nombres contengan "BANCO" y "MAYOR" respectivamente.
+  3. Abre conciliacion.py y revisa el diccionario CONFIG:
+     - ¿Las filas a saltar son las mismas? (banco_skiprows, mayor_skiprows)
+     - ¿El formato de fecha del mayor es DD/MM/AAAA?
+     - ¿El período es correcto? (fecha_inicio, fecha_fin)
+  4. Ejecuta: python3 conciliacion.py
+
+
+════════════════════════════════════════════════════════════════════════════════
+  Versión: 1.0 — Marzo 2026
+  Desarrollado para Inversus Corporate Finance
+════════════════════════════════════════════════════════════════════════════════
