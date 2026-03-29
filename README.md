@@ -46,7 +46,7 @@ Compara automáticamente los movimientos del banco con los apuntes del libro may
 ### 2. Descargar el proyecto
 
 ```bash
-git clone https://github.com/TU_USUARIO/punteo_automatizado.git
+git clone https://github.com/franmrtnzz/punteo_automatizado.git
 cd punteo_automatizado
 ```
 
